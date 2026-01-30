@@ -1,0 +1,18 @@
+﻿akhil mainprj
+DS
+firebased-quickbite-main
+jisha
+jupiter
+pr
+QuickBite-main
+smart-ride-live-main
+smartChess-main
+Tor Browser
+Excel Shortcuts Cheat sheet.pdf
+Keyboard_shortcuts_in_Windows_10.pdf
+MinGW Installer.lnk
+Miniproject-01[1].pptx
+my-upload-key.keystore
+Petzee.pptx
+Tor Browser.lnk
+Trae.lnk
