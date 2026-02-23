@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useBuses, useRoutes, useStops } from '@/hooks/useFirestore';
 import { BusMap } from '@/components/BusMap';
 import { CrowdIndicator } from '@/components/CrowdIndicator';
-import { Bus as BusIcon, Loader2, Activity, Gauge, ArrowRight } from 'lucide-react';
+import { Bus as BusIcon, Loader2, Activity, Gauge, ArrowRight, AlertTriangle } from 'lucide-react';
 import { where } from 'firebase/firestore';
 import { cn } from '@/lib/utils';
 
@@ -63,11 +63,19 @@ export default function LiveMonitor() {
                           <BusIcon className="h-5 w-5 text-primary" />
                           <span className="font-medium">{bus.busNumber}</span>
                         </div>
-                        {route && bus.currentStopIndex === route.stops.length - 1 && (
-                          <div className="text-[10px] bg-success/15 text-success px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                            Reached End
-                          </div>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {bus.hazard && (
+                            <div className="flex items-center gap-1 bg-destructive/15 text-destructive px-2 py-0.5 rounded-full font-bold text-[10px] animate-pulse">
+                              <AlertTriangle className="h-3 w-3" />
+                              HAZARD
+                            </div>
+                          )}
+                          {route && bus.currentStopIndex === route.stops.length - 1 && (
+                            <div className="text-[10px] bg-success/15 text-success px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                              Reached End
+                            </div>
+                          )}
+                        </div>
                       </div>
                       <p className="text-sm text-muted-foreground mb-3">{route?.name || 'No route'}</p>
 

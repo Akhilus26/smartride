@@ -194,12 +194,12 @@ export default function ManageBuses() {
                           <Badge
                             variant="outline"
                             className={
-                              bus.status === 'active'
+                              ['active', 'started'].includes(bus.status)
                                 ? 'bg-success/15 text-success'
                                 : 'bg-muted text-muted-foreground'
                             }
                           >
-                            {bus.status}
+                            {bus.status === 'started' ? 'On Trip' : bus.status}
                           </Badge>
                         </div>
                       </div>
@@ -335,8 +335,6 @@ export default function ManageBuses() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="starting">Starting</SelectItem>
-                    <SelectItem value="active">Active (Live Track)</SelectItem>
-                    <SelectItem value="ended">Ended</SelectItem>
                     <SelectItem value="idle">Idle</SelectItem>
                     <SelectItem value="maintenance">Maintenance</SelectItem>
                   </SelectContent>

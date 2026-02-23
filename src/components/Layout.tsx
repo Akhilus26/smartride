@@ -21,6 +21,7 @@ const conductorNavItems = [
 
 const adminNavItems = [
   { label: 'Dashboard', href: '/admin' },
+  { label: 'Fleet Status', href: '/admin/fleet' },
   { label: 'Buses', href: '/admin/buses' },
   { label: 'Routes', href: '/admin/routes' },
   { label: 'Stops', href: '/admin/stops' },

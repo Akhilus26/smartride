@@ -23,6 +23,8 @@ export interface Bus {
   capacity: number;
   passengerCount: number;
   status: 'idle' | 'active' | 'maintenance' | 'starting' | 'ended' | 'started';
+  hazard?: boolean;
+  hazardReason?: string;
   scheduledTime?: string;
   location?: {
     latitude: number;
@@ -32,6 +34,18 @@ export interface Bus {
     updatedAt: Timestamp;
   };
   currentStopIndex?: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+// Notification document
+export interface Notification {
+  id: string;
+  type: 'overspeed' | 'hazard' | 'trip_completed';
+  busId: string;
+  speed?: number;
+  message?: string;
+  isRead: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

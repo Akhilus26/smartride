@@ -23,7 +23,8 @@ import {
   UserMinus,
   Check,
   Gauge,
-  ArrowRight
+  ArrowRight,
+  AlertTriangle
 } from 'lucide-react';
 import { doc, updateDoc, increment, serverTimestamp, collection, addDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -49,14 +50,26 @@ export default function ConductorDashboard() {
 
   const loading = busLoading;
 
+  const [isReportingHazard, setIsReportingHazard] = React.useState(false);
+
   const handleStartTrip = async () => {
     if (!bus) return;
+
+    if (bus.status !== 'starting') {
+      toast({
+        title: 'Cannot Start Trip',
+        description: 'The bus status must be "starting" to begin a trip. Please contact admin if needed.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     try {
       startTracking(bus.id);
       const busRef = doc(db, 'buses', bus.id);
       await updateDoc(busRef, {
         status: 'started',
+        hazard: false,
         updatedAt: serverTimestamp(),
       });
 
@@ -66,6 +79,47 @@ export default function ConductorDashboard() {
       });
     } catch (err) {
       console.error('Error starting trip:', err);
+    }
+  };
+
+  const handleReportHazard = async () => {
+    if (!bus) return;
+
+    setIsReportingHazard(true);
+    try {
+      const busRef = doc(db, 'buses', bus.id);
+      await updateDoc(busRef, {
+        status: 'maintenance',
+        hazard: true,
+        updatedAt: serverTimestamp(),
+      });
+
+      await addDoc(collection(db, 'notifications'), {
+        type: 'hazard',
+        busId: bus.id,
+        message: `Hazard/Accident reported for bus ${bus.busNumber}`,
+        isRead: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      toast({
+        title: 'Hazard Reported',
+        description: 'Admin has been notified. Bus status updated to maintenance.',
+        variant: 'destructive',
+      });
+
+      if (isTracking) {
+        handleEndTrip();
+      }
+    } catch (err) {
+      toast({
+        title: 'Error',
+        description: 'Failed to report hazard',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsReportingHazard(false);
     }
   };
 
@@ -181,14 +235,23 @@ export default function ConductorDashboard() {
               Manage your bus and passengers
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="destructive"
+              onClick={handleReportHazard}
+              disabled={isReportingHazard}
+              className="bg-orange-600 hover:bg-orange-700"
+            >
+              {isReportingHazard ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <AlertTriangle className="mr-2 h-4 w-4" />}
+              Report Hazard
+            </Button>
             {isTracking ? (
               <Button variant="destructive" onClick={handleEndTrip}>
                 <Square className="mr-2 h-4 w-4" />
                 End Trip
               </Button>
             ) : (
-              <Button onClick={handleStartTrip}>
+              <Button onClick={handleStartTrip} disabled={bus.status !== 'starting'}>
                 <Play className="mr-2 h-4 w-4" />
                 Start Trip
               </Button>

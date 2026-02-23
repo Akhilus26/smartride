@@ -29,6 +29,8 @@ import ManageRoutes from "@/pages/admin/ManageRoutes";
 import ManageStops from "@/pages/admin/ManageStops";
 import LiveMonitor from "@/pages/admin/LiveMonitor";
 import Reports from "@/pages/admin/Reports";
+import FleetStatus from "@/pages/admin/FleetStatus";
+import BusDetails from "@/pages/admin/BusDetails";
 import ManageUsers from "@/pages/admin/ManageUsers";
 import CreateConductor from "@/pages/admin/CreateConductor";
 import Profile from "@/pages/Profile";
@@ -71,6 +73,8 @@ const App = () => (
               <Route path="/admin/stops" element={<ProtectedRoute allowedRoles={['admin']}><ManageStops /></ProtectedRoute>} />
               <Route path="/admin/monitor" element={<ProtectedRoute allowedRoles={['admin']}><LiveMonitor /></ProtectedRoute>} />
               <Route path="/admin/reports" element={<ProtectedRoute allowedRoles={['admin']}><Reports /></ProtectedRoute>} />
+              <Route path="/admin/fleet" element={<ProtectedRoute allowedRoles={['admin']}><FleetStatus /></ProtectedRoute>} />
+              <Route path="/admin/fleet/:id" element={<ProtectedRoute allowedRoles={['admin']}><BusDetails /></ProtectedRoute>} />
               <Route path="/admin/users" element={<ProtectedRoute allowedRoles={['admin']}><ManageUsers /></ProtectedRoute>} />
               <Route path="/admin/conductors/new" element={<ProtectedRoute allowedRoles={['admin']}><CreateConductor /></ProtectedRoute>} />
 

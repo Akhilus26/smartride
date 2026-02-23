@@ -240,6 +240,12 @@ export default function AdminDashboard() {
               <CardTitle>Fleet Management</CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-3">
+              <Button asChild variant="outline" className="h-auto py-4 flex-col gap-2 border-primary/30 hover:bg-primary/5">
+                <Link to="/admin/fleet">
+                  <Activity className="h-6 w-6 text-primary" />
+                  <div className="text-sm font-semibold text-primary">Fleet Status</div>
+                </Link>
+              </Button>
               <Button asChild variant="outline" className="h-auto py-4 flex-col gap-2">
                 <Link to="/admin/buses">
                   <Bus className="h-6 w-6 text-primary" />

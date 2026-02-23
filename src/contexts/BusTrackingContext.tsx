@@ -104,7 +104,7 @@ export function BusTrackingProvider({ children }: { children: React.ReactNode })
             try {
                 const busRef = doc(db, 'buses', busId);
                 await updateDoc(busRef, {
-                    status: 'ended',
+                    status: 'idle',
                     updatedAt: serverTimestamp(),
                 });
             } catch (err: any) {

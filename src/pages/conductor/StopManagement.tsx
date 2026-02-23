@@ -6,9 +6,10 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { useConductorBus, useRoute, useStops, useBusTickets } from '@/hooks/useFirestore';
 import { useAuth } from '@/contexts/AuthContext';
-import { 
-  MapPin, 
-  CheckCircle, 
+import { useBusTracking } from '@/contexts/BusTrackingContext';
+import {
+  MapPin,
+  CheckCircle,
   Loader2,
   AlertCircle,
   Users,
@@ -26,7 +27,8 @@ export default function StopManagement() {
   const { data: route, loading: routeLoading } = useRoute(bus?.routeId || null);
   const { data: allStops, loading: stopsLoading } = useStops();
   const { data: boardedTickets } = useBusTickets(bus?.id || '', 'BOARDED');
-  
+  const { stopTracking } = useBusTracking();
+
   const [processing, setProcessing] = useState(false);
   const [arrivedStopId, setArrivedStopId] = useState<string | null>(null);
 
@@ -49,14 +51,17 @@ export default function StopManagement() {
     setArrivedStopId(stopId);
 
     try {
+      const stopIndex = route?.stops.indexOf(stopId) ?? -1;
+      const isLastStop = route && stopIndex === route.stops.length - 1;
+
       // Find all boarded tickets with this destination
       const ticketsToExit = boardedTickets.filter(
         (t) => t.destinationStop === stopId
       );
 
-      if (ticketsToExit.length > 0) {
-        const batch = writeBatch(db);
+      const batch = writeBatch(db);
 
+      if (ticketsToExit.length > 0) {
         // Update each ticket to EXITED
         ticketsToExit.forEach((ticket) => {
           const ticketRef = doc(db, 'tickets', ticket.id);
@@ -67,33 +72,56 @@ export default function StopManagement() {
           });
         });
 
-        // Decrement passenger count
-        const busRef = doc(db, 'buses', bus.id);
-        batch.update(busRef, {
-          passengerCount: increment(-ticketsToExit.length),
-          currentStopIndex: route?.stops.indexOf(stopId),
-          updatedAt: serverTimestamp(),
-        });
-
-        await batch.commit();
-
         toast({
           title: 'Passengers Exited',
           description: `${ticketsToExit.length} passenger(s) marked as exited at this stop.`,
         });
-      } else {
-        // Just update the current stop
-        const busRef = doc(db, 'buses', bus.id);
-        await updateDoc(busRef, {
-          currentStopIndex: route?.stops.indexOf(stopId),
+      }
+
+      // Update the bus document
+      const busRef = doc(db, 'buses', bus.id);
+      const busUpdate: any = {
+        currentStopIndex: stopIndex,
+        updatedAt: serverTimestamp(),
+      };
+
+      if (ticketsToExit.length > 0) {
+        busUpdate.passengerCount = increment(-ticketsToExit.length);
+      }
+
+      if (isLastStop) {
+        // Automatically stop tracking when destination reached
+        await stopTracking(bus.id);
+
+        busUpdate.status = 'idle';
+        busUpdate.hazard = false; // Clear hazard on trip completion if any
+        busUpdate.currentStopIndex = -1; // Reset stop progress for next trip
+
+        // Add notification for admin
+        const notificationRef = doc(collection(db, 'notifications'));
+        batch.set(notificationRef, {
+          type: 'trip_completed',
+          busId: bus.id,
+          message: `Bus ${bus.busNumber} has reached its destination and completed the trip.`,
+          isRead: false,
+          createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
 
+        toast({
+          title: 'Trip Completed',
+          description: 'You have reached the last stop. Status updated to Idle and tracking stopped.',
+        });
+      } else if (!ticketsToExit.length) {
         toast({
           title: 'Arrived at Stop',
           description: 'No passengers exiting at this stop.',
         });
       }
+
+      batch.update(busRef, busUpdate);
+      await batch.commit();
+
     } catch (err: any) {
       console.error('Error processing stop arrival:', err);
       toast({
@@ -203,7 +231,7 @@ export default function StopManagement() {
                       'flex items-center justify-between p-4 rounded-lg border transition-all',
                       justArrived && 'bg-success/10 border-success',
                       isCurrentStop && !justArrived && 'bg-primary/5 border-primary',
-                      isPastStop && 'opacity-50'
+                      (isPastStop || (index > (bus.currentStopIndex ?? -1) + 1)) && 'opacity-50'
                     )}
                   >
                     <div className="flex items-center gap-3">
@@ -213,8 +241,8 @@ export default function StopManagement() {
                           isPastStop
                             ? 'bg-muted text-muted-foreground'
                             : isCurrentStop
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-secondary text-secondary-foreground'
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-secondary text-secondary-foreground'
                         )}
                       >
                         {isPastStop ? (
@@ -243,7 +271,7 @@ export default function StopManagement() {
                       <Button
                         size="sm"
                         variant={justArrived ? 'default' : 'outline'}
-                        disabled={processing || isPastStop}
+                        disabled={processing || isPastStop || index !== (bus.currentStopIndex ?? -1) + 1}
                         onClick={() => handleArriveAtStop(stop.id)}
                       >
                         {processing && arrivedStopId === stop.id ? (
