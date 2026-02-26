@@ -9,16 +9,17 @@ import { useActiveTickets, useCompletedTickets, useStops } from '@/hooks/useFire
 import { useAuth } from '@/contexts/AuthContext';
 import { Ticket } from '@/types';
 import QRCode from 'react-qr-code';
-import { 
-  Ticket as TicketIcon, 
-  MapPin, 
-  Clock, 
-  QrCode, 
+import {
+  Ticket as TicketIcon,
+  MapPin,
+  Clock,
+  QrCode,
   Loader2,
   ArrowRight,
   CheckCircle,
   XCircle,
-  AlertCircle
+  AlertCircle,
+  Users
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -78,8 +79,19 @@ export default function MyTickets() {
               <div className="font-mono text-sm text-muted-foreground">
                 #{ticket.id.slice(-8).toUpperCase()}
               </div>
-              <div className="text-xs text-muted-foreground">
-                {formatDate(ticket.createdAt)}
+              <div className="flex items-center gap-2 mt-0.5">
+                <div className="text-xs text-muted-foreground">
+                  {formatDate(ticket.createdAt)}
+                </div>
+                {ticket.ticketCount > 0 && (
+                  <>
+                    <span className="text-muted-foreground">·</span>
+                    <div className="flex items-center gap-1 text-xs font-medium text-primary">
+                      <Users className="h-3 w-3" />
+                      {ticket.ticketCount} {ticket.ticketCount === 1 ? 'Ticket' : 'Tickets'}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -105,7 +117,14 @@ export default function MyTickets() {
         </div>
 
         <div className="flex items-center justify-between pt-3 border-t">
-          <div className="text-lg font-bold">₹{ticket.fare}</div>
+          <div className="flex flex-col">
+            <div className="text-lg font-bold">₹{ticket.fare}</div>
+            {ticket.ticketCount > 1 && (
+              <div className="text-[10px] text-muted-foreground">
+                ₹{(ticket.fare / ticket.ticketCount).toFixed(2)} x {ticket.ticketCount}
+              </div>
+            )}
+          </div>
           {showQR && ['CONFIRMED', 'PENDING'].includes(ticket.status) && (
             <Button size="sm" onClick={() => handleShowQR(ticket)}>
               <QrCode className="h-4 w-4 mr-2" />
@@ -203,6 +222,10 @@ export default function MyTickets() {
                 <div className="text-center">
                   <div className="font-mono text-sm text-muted-foreground">
                     #{selectedTicket.id.slice(-8).toUpperCase()}
+                  </div>
+                  <div className="mt-1 flex items-center justify-center gap-1 text-xs font-medium text-primary">
+                    <Users className="h-3 w-3" />
+                    {selectedTicket.ticketCount} {selectedTicket.ticketCount === 1 ? 'Ticket' : 'Tickets'}
                   </div>
                   <div className="mt-2 flex items-center justify-center gap-2 text-sm">
                     <span>{getStopName(selectedTicket.boardingStop)}</span>

@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Layout } from '@/components/Layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { useConductorBus, useRoute, useBusTickets, useStops } from '@/hooks/useFirestore';
+import { useConductorBus, useRoute, useBusTickets, useStops, useNotifications } from '@/hooks/useFirestore';
 import { useBusTracking } from '@/contexts/BusTrackingContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { CrowdIndicator, CrowdProgress } from '@/components/CrowdIndicator';
@@ -24,16 +24,19 @@ import {
   Check,
   Gauge,
   ArrowRight,
-  AlertTriangle
+  AlertTriangle,
+  Bell
 } from 'lucide-react';
-import { doc, updateDoc, increment, serverTimestamp, collection, addDoc } from 'firebase/firestore';
+import { doc, updateDoc, increment, serverTimestamp, collection, addDoc, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import { isAfter, parseISO, format, startOfToday, isSameDay } from 'date-fns';
 
 export default function ConductorDashboard() {
   const { userProfile } = useAuth();
@@ -44,13 +47,106 @@ export default function ConductorDashboard() {
   const { data: allStops } = useStops();
   const { isTracking, startTracking, stopTracking, error: trackingError } = useBusTracking();
 
+  const { data: incidents } = useNotifications(
+    bus?.id ? [
+      where('type', '==', 'incident'),
+      where('busId', '==', bus.id),
+      where('isRead', '==', false)
+    ] : [where('busId', '==', 'NON_EXISTENT_BUS_ID')],
+    [bus?.id]
+  );
+
   const [cashDialogOpen, setCashDialogOpen] = React.useState(false);
   const [selectedDestination, setSelectedDestination] = React.useState('');
   const [isSubmittingCash, setIsSubmittingCash] = React.useState(false);
 
+  // Audio Alert Logic
+  const prevIncidentsCount = useRef(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    // Initialize audio object
+    if (!audioRef.current) {
+      audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3'); // Emergency Siren
+      audioRef.current.loop = false;
+    }
+
+    if (incidents && incidents.length > prevIncidentsCount.current) {
+      // New incident reported!
+      audioRef.current.loop = true;
+      audioRef.current.play().catch(err => console.error('Audio play failed:', err));
+
+      // Stop after 5 seconds
+      setTimeout(() => {
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.currentTime = 0;
+        }
+      }, 5000);
+
+      // Also trigger a vibration pattern if supported
+      if ('vibrate' in navigator) {
+        navigator.vibrate([500, 200, 500, 200, 500]);
+      }
+    }
+
+    prevIncidentsCount.current = incidents?.length || 0;
+  }, [incidents]);
+
   const loading = busLoading;
 
   const [isReportingHazard, setIsReportingHazard] = React.useState(false);
+  const [hazardDialogOpen, setHazardDialogOpen] = React.useState(false);
+  const [hazardReason, setHazardReason] = React.useState('');
+  const [otherReason, setOtherReason] = React.useState('');
+  const [showScheduleAlert, setShowScheduleAlert] = useState(false);
+
+  useEffect(() => {
+    if (!bus || bus.status !== 'starting' || !bus.scheduledDate || !bus.scheduledTime) {
+      setShowScheduleAlert(false);
+      return;
+    }
+
+    const checkSchedule = () => {
+      const today = startOfToday();
+      const scheduledDate = parseISO(bus.scheduledDate);
+
+      if (isSameDay(scheduledDate, today)) {
+        const [hours, minutes] = bus.scheduledTime.split(':').map(Number);
+        const scheduledDateTime = new Date();
+        scheduledDateTime.setHours(hours, minutes, 0, 0);
+
+        if (isAfter(new Date(), scheduledDateTime)) {
+          setShowScheduleAlert(true);
+        } else {
+          setShowScheduleAlert(false);
+        }
+      } else {
+        setShowScheduleAlert(false);
+      }
+    };
+
+    checkSchedule();
+    const interval = setInterval(checkSchedule, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, [bus]);
+
+  const handleMarkIncidentResolved = async (incidentId: string) => {
+    try {
+      const incidentRef = doc(db, 'notifications', incidentId);
+      await updateDoc(incidentRef, {
+        isRead: true,
+        status: 'resolved',
+        updatedAt: serverTimestamp(),
+      });
+      toast({
+        title: 'Incident Resolved',
+        description: 'The incident has been marked as resolved.',
+      });
+    } catch (err) {
+      console.error('Error marking incident as resolved:', err);
+    }
+  };
 
   const handleStartTrip = async () => {
     if (!bus) return;
@@ -70,6 +166,7 @@ export default function ConductorDashboard() {
       await updateDoc(busRef, {
         status: 'started',
         hazard: false,
+        currentStopIndex: 0, // Auto-mark first stop as arrived
         updatedAt: serverTimestamp(),
       });
 
@@ -83,21 +180,28 @@ export default function ConductorDashboard() {
   };
 
   const handleReportHazard = async () => {
-    if (!bus) return;
+    if (!bus || !hazardReason) return;
+    if (hazardReason === 'others' && !otherReason) return;
 
     setIsReportingHazard(true);
     try {
       const busRef = doc(db, 'buses', bus.id);
+      const reasonDisplay = hazardReason === 'others' ? otherReason : hazardReason;
+
       await updateDoc(busRef, {
         status: 'maintenance',
         hazard: true,
+        hazardReason: hazardReason,
+        hazardOtherReason: hazardReason === 'others' ? otherReason : null,
         updatedAt: serverTimestamp(),
       });
 
       await addDoc(collection(db, 'notifications'), {
         type: 'hazard',
         busId: bus.id,
-        message: `Hazard/Accident reported for bus ${bus.busNumber}`,
+        message: `Bus ${bus.busNumber} has got some issue due to ${reasonDisplay}`,
+        hazardReason: hazardReason,
+        hazardOtherReason: hazardReason === 'others' ? otherReason : null,
         isRead: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -105,9 +209,13 @@ export default function ConductorDashboard() {
 
       toast({
         title: 'Hazard Reported',
-        description: 'Admin has been notified. Bus status updated to maintenance.',
+        description: 'Admin and passengers have been notified. Bus status updated to maintenance.',
         variant: 'destructive',
       });
+
+      setHazardDialogOpen(false);
+      setHazardReason('');
+      setOtherReason('');
 
       if (isTracking) {
         handleEndTrip();
@@ -128,9 +236,23 @@ export default function ConductorDashboard() {
 
     try {
       await stopTracking(bus.id);
+
+      const busRef = doc(db, 'buses', bus.id);
+      await updateDoc(busRef, {
+        status: 'idle',
+        passengerCount: 0,
+        currentStopIndex: 0,
+        hazard: false,
+        hazardReason: null,
+        hazardOtherReason: null,
+        scheduledDate: null,
+        scheduledTime: null,
+        updatedAt: serverTimestamp(),
+      });
+
       toast({
         title: 'Trip Ended',
-        description: 'Trip status updated to Ended. GPS tracking stopped.',
+        description: 'Trip ended. All counts and schedules have been reset to default.',
       });
     } catch (err) {
       console.error('Error ending trip:', err);
@@ -228,6 +350,46 @@ export default function ConductorDashboard() {
   return (
     <Layout>
       <div className="space-y-6">
+        {/* Incident Alerts */}
+        {incidents && incidents.length > 0 && (
+          <div className="space-y-3">
+            {incidents.map((incident) => (
+              <Alert key={incident.id} variant="destructive" className="animate-pulse border-2">
+                <AlertCircle className="h-5 w-5" />
+                <div className="flex-1">
+                  <div className="font-bold text-lg mb-1">PASSENGER INCIDENT REPORTED!</div>
+                  <AlertDescription className="text-base font-medium">
+                    {incident.message}
+                  </AlertDescription>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="bg-background hover:bg-muted"
+                  onClick={() => handleMarkIncidentResolved(incident.id)}
+                >
+                  <Check className="h-4 w-4 mr-1" />
+                  Mark as Resolved
+                </Button>
+              </Alert>
+            ))}
+          </div>
+        )}
+
+        {/* Schedule Alert */}
+        {showScheduleAlert && (
+          <Alert className="bg-primary/10 border-primary animate-bounce">
+            <Bell className="h-5 w-5 text-primary" />
+            <div className="flex-1">
+              <div className="font-bold text-primary">Scheduled Time Reached!</div>
+              <AlertDescription>
+                It is now past the scheduled departure time ({bus?.scheduledTime}). You can start the trip.
+              </AlertDescription>
+            </div>
+          </Alert>
+        )}
+
+        {/* Status Banner */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold">Conductor Dashboard</h1>
@@ -238,11 +400,11 @@ export default function ConductorDashboard() {
           <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="destructive"
-              onClick={handleReportHazard}
+              onClick={() => setHazardDialogOpen(true)}
               disabled={isReportingHazard}
               className="bg-orange-600 hover:bg-orange-700"
             >
-              {isReportingHazard ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <AlertTriangle className="mr-2 h-4 w-4" />}
+              <AlertTriangle className="mr-2 h-4 w-4" />
               Report Hazard
             </Button>
             {isTracking ? (
@@ -444,6 +606,67 @@ export default function ConductorDashboard() {
             </Link>
           </Button>
         </div>
+
+        {/* Report Hazard Dialog */}
+        <Dialog open={hazardDialogOpen} onOpenChange={setHazardDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Report Hazard</DialogTitle>
+              <DialogDescription>
+                Select the reason for reporting a hazard. This will notify admin and passengers.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="hazard-reason">Reason</Label>
+                <Select
+                  value={hazardReason}
+                  onValueChange={setHazardReason}
+                >
+                  <SelectTrigger id="hazard-reason">
+                    <SelectValue placeholder="Select reason" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="breakdown">Breakdown</SelectItem>
+                    <SelectItem value="harassment">Harassment</SelectItem>
+                    <SelectItem value="medical issue">Medical Issue</SelectItem>
+                    <SelectItem value="accident">Accident</SelectItem>
+                    <SelectItem value="others">Others</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {hazardReason === 'others' && (
+                <div className="space-y-2">
+                  <Label htmlFor="other-reason">Specify Reason</Label>
+                  <Textarea
+                    id="other-reason"
+                    placeholder="Enter the reason here..."
+                    value={otherReason}
+                    onChange={(e) => setOtherReason(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setHazardDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleReportHazard}
+                disabled={!hazardReason || (hazardReason === 'others' && !otherReason) || isReportingHazard}
+              >
+                {isReportingHazard ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <AlertTriangle className="h-4 w-4 mr-2" />
+                )}
+                Report Hazard
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Add Cash Passenger Dialog */}
         <Dialog open={cashDialogOpen} onOpenChange={setCashDialogOpen}>

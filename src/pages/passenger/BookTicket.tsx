@@ -18,12 +18,14 @@ import {
   Loader2,
   AlertCircle,
   CheckCircle,
-  ArrowRight
+  ArrowRight,
+  Users
 } from 'lucide-react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { where } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
+import { format, isSameDay, isAfter, parseISO, startOfToday } from 'date-fns';
 import {
   Dialog,
   DialogContent,
@@ -39,7 +41,7 @@ export default function BookTicket() {
   const { userProfile } = useAuth();
   const { toast } = useToast();
 
-  const { data: buses, loading: busesLoading } = useBuses([where('status', 'in', ['active', 'started'])]);
+  const { data: buses, loading: busesLoading } = useBuses([where('status', 'in', ['active', 'started', 'starting', 'idle'])]);
   const { data: routes, loading: routesLoading } = useRoutes([where('isActive', '==', true)]);
   const { data: stops, loading: stopsLoading } = useStops();
 
@@ -47,6 +49,7 @@ export default function BookTicket() {
   const [selectedBus, setSelectedBus] = useState<string>('');
   const [boardingStop, setBoardingStop] = useState<string>('');
   const [destinationStop, setDestinationStop] = useState<string>('');
+  const [ticketCount, setTicketCount] = useState<number>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
@@ -76,8 +79,26 @@ export default function BookTicket() {
     return orderedStops;
   }, [selectedRouteData, stops]);
 
-  // Get buses for selected route
-  const routeBuses = buses.filter((b) => b.routeId === selectedRoute);
+  // Get buses for selected route and filter by schedule
+  const routeBuses = React.useMemo(() => {
+    const today = startOfToday();
+    return buses.filter((b) => {
+      if (b.routeId !== selectedRoute) return false;
+
+      // Show only buses with an active schedule
+      if (!b.scheduledDate || !b.scheduledTime) return false;
+
+      try {
+        const scheduledDate = parseISO(b.scheduledDate);
+        if (isNaN(scheduledDate.getTime())) return true; // Treat invalid dates as legacy
+
+        // Show buses scheduled for today or any future date
+        return isSameDay(scheduledDate, today) || isAfter(scheduledDate, today);
+      } catch (e) {
+        return true; // Safety fallback
+      }
+    });
+  }, [buses, selectedRoute]);
 
   // Get index of boarding stop within the ordered routeStops
   const boardingStopIndex = React.useMemo(() => {
@@ -101,8 +122,20 @@ export default function BookTicket() {
     });
   }, [routeStops, boardingStopIndex, selectedBus, routeBuses]);
 
-  // Calculate fare based on route
-  const fare = selectedRouteData?.fare || 0;
+  // Calculate fare based on stops: 10 RS base + 5 RS per additional stop
+  const farePerTicket = React.useMemo(() => {
+    if (!boardingStop || !destinationStop || !selectedRouteData) return 0;
+
+    const bIndex = routeStops.findIndex(s => s.id.trim() === boardingStop.trim());
+    const dIndex = routeStops.findIndex(s => s.id.trim() === destinationStop.trim());
+
+    if (bIndex === -1 || dIndex === -1 || dIndex <= bIndex) return 0;
+
+    const stopsTraveled = dIndex - bIndex;
+    return 10 + (stopsTraveled - 1) * 5;
+  }, [boardingStop, destinationStop, routeStops, selectedRouteData]);
+
+  const totalFare = farePerTicket * ticketCount;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -140,7 +173,8 @@ export default function BookTicket() {
         routeId: selectedRoute,
         boardingStop,
         destinationStop,
-        fare,
+        ticketCount,
+        fare: totalFare,
         status: 'CONFIRMED',
         paymentMethod: 'online',
         createdAt: serverTimestamp(),
@@ -267,6 +301,19 @@ export default function BookTicket() {
                               <div>
                                 <div className="font-medium">{bus.busNumber}</div>
                                 <div className="text-sm text-muted-foreground">
+                                  {bus.scheduledDate && (() => {
+                                    try {
+                                      const date = parseISO(bus.scheduledDate);
+                                      if (isNaN(date.getTime())) return null;
+                                      return (
+                                        <span className="block italic">
+                                          {format(date, 'MMM d, yyyy')}
+                                        </span>
+                                      );
+                                    } catch (e) {
+                                      return null;
+                                    }
+                                  })()}
                                   {bus.scheduledTime ? `Scheduled: ${bus.scheduledTime}` : `Capacity: ${bus.capacity} seats`}
                                 </div>
                                 {bus.scheduledTime && (
@@ -359,6 +406,44 @@ export default function BookTicket() {
                   </div>
                 )}
 
+                {/* Ticket Count Selection */}
+                {selectedBus && boardingStop && destinationStop && (
+                  <div className="space-y-4 p-4 rounded-lg border bg-card">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Users className="h-5 w-5 text-primary" />
+                        <Label htmlFor="ticketCount" className="font-medium">Number of Tickets</Label>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => setTicketCount(Math.max(1, ticketCount - 1))}
+                          disabled={ticketCount <= 1}
+                        >
+                          -
+                        </Button>
+                        <span className="w-8 text-center font-bold text-lg">{ticketCount}</span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => setTicketCount(Math.min(6, ticketCount + 1))}
+                          disabled={ticketCount >= 6}
+                        >
+                          +
+                        </Button>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Maximum 6 tickets allowed per booking.
+                    </p>
+                  </div>
+                )}
+
                 {/* Journey Summary */}
                 {boardingStop && destinationStop && (
                   <div className="p-4 rounded-lg bg-muted/50">
@@ -374,9 +459,19 @@ export default function BookTicket() {
                         {stops.find((s) => s.id === destinationStop)?.name}
                       </div>
                     </div>
-                    <div className="mt-3 pt-3 border-t flex justify-between items-center">
-                      <span className="text-muted-foreground">Fare</span>
-                      <span className="text-xl font-bold">₹{fare}</span>
+                    <div className="mt-4 space-y-2 border-t pt-3">
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-muted-foreground">Fare per ticket</span>
+                        <span>₹{farePerTicket}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-muted-foreground">Tickets</span>
+                        <span>x{ticketCount}</span>
+                      </div>
+                      <div className="flex justify-between items-center pt-2 border-t">
+                        <span className="font-bold">Total Fare</span>
+                        <span className="text-xl font-bold text-primary">₹{totalFare}</span>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -396,7 +491,7 @@ export default function BookTicket() {
                   ) : (
                     <>
                       <CreditCard className="mr-2 h-4 w-4" />
-                      Proceed to Payment - ₹{fare}
+                      Proceed to Payment - ₹{totalFare}
                     </>
                   )}
                 </Button>
@@ -411,7 +506,7 @@ export default function BookTicket() {
             <DialogHeader>
               <DialogTitle>Secure Payment</DialogTitle>
               <DialogDescription>
-                Complete your payment of ₹{fare} to book your ticket.
+                Complete your payment of ₹{totalFare} to book your {ticketCount} ticket{ticketCount > 1 ? 's' : ''}.
               </DialogDescription>
             </DialogHeader>
 
@@ -455,7 +550,7 @@ export default function BookTicket() {
                   </div>
                   <p className="text-xl font-bold">Payment Success!</p>
                   <p className="text-sm text-muted-foreground text-center">
-                    Your ticket for ₹{fare} has been confirmed.
+                    Your {ticketCount} ticket{ticketCount > 1 ? 's' : ''} for ₹{totalFare} {ticketCount > 1 ? 'have' : 'has'} been confirmed.
                   </p>
                 </div>
               )}
@@ -467,7 +562,7 @@ export default function BookTicket() {
                   Cancel
                 </Button>
                 <Button className="flex-1" onClick={handleProcessPayment}>
-                  Pay ₹{fare}
+                  Pay ₹{totalFare}
                 </Button>
               </DialogFooter>
             )}

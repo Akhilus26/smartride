@@ -9,12 +9,13 @@ import {
   QueryConstraint
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Bus, Route, Stop, Ticket, UserProfile } from '@/types';
+import { Bus, Route, Stop, Ticket, UserProfile, AppNotification } from '@/types';
 
 // Generic hook for real-time collection listening
 export function useFirestoreCollection<T>(
   collectionName: string,
-  constraints: QueryConstraint[] = []
+  constraints: QueryConstraint[] = [],
+  dependencies: any[] = []
 ) {
   const [data, setData] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,7 +43,7 @@ export function useFirestoreCollection<T>(
     );
 
     return () => unsubscribe();
-  }, [collectionName]); // Use simple collectionName dependency for maximum stability
+  }, [collectionName, ...dependencies]);
 
   return { data, loading, error };
 }
@@ -87,33 +88,33 @@ export function useFirestoreDoc<T>(collectionName: string, docId: string | null)
 }
 
 // Specific hooks for different collections
-export function useBuses(constraints: QueryConstraint[] = []) {
-  return useFirestoreCollection<Bus>('buses', constraints);
+export function useBuses(constraints: QueryConstraint[] = [], dependencies: any[] = []) {
+  return useFirestoreCollection<Bus>('buses', constraints, dependencies);
 }
 
 export function useBus(busId: string | null) {
   return useFirestoreDoc<Bus>('buses', busId);
 }
 
-export function useRoutes(constraints: QueryConstraint[] = []) {
-  return useFirestoreCollection<Route>('routes', constraints);
+export function useRoutes(constraints: QueryConstraint[] = [], dependencies: any[] = []) {
+  return useFirestoreCollection<Route>('routes', constraints, dependencies);
 }
 
 export function useRoute(routeId: string | null) {
   return useFirestoreDoc<Route>('routes', routeId);
 }
 
-export function useStops(constraints: QueryConstraint[] = []) {
-  return useFirestoreCollection<Stop>('stops', constraints);
+export function useStops(constraints: QueryConstraint[] = [], dependencies: any[] = []) {
+  return useFirestoreCollection<Stop>('stops', constraints, dependencies);
 }
 
 export function useStop(stopId: string | null) {
   return useFirestoreDoc<Stop>('stops', stopId);
 }
 
-export function useTickets(userId?: string) {
+export function useTickets(userId?: string, dependencies: any[] = []) {
   const constraints = userId ? [where('userId', '==', userId)] : [];
-  return useFirestoreCollection<Ticket>('tickets', constraints);
+  return useFirestoreCollection<Ticket>('tickets', constraints, dependencies.length > 0 ? dependencies : [userId]);
 }
 
 export function useActiveTickets(userId: string) {
@@ -121,7 +122,7 @@ export function useActiveTickets(userId: string) {
     where('userId', '==', userId),
     where('status', 'in', ['PENDING', 'CONFIRMED', 'BOARDED'])
   ];
-  return useFirestoreCollection<Ticket>('tickets', constraints);
+  return useFirestoreCollection<Ticket>('tickets', constraints, [userId]);
 }
 
 export function useCompletedTickets(userId: string) {
@@ -129,20 +130,25 @@ export function useCompletedTickets(userId: string) {
     where('userId', '==', userId),
     where('status', 'in', ['EXITED', 'CANCELLED', 'EXPIRED'])
   ];
-  return useFirestoreCollection<Ticket>('tickets', constraints);
+  return useFirestoreCollection<Ticket>('tickets', constraints, [userId]);
 }
 
 export function useBusTickets(busId: string, status?: string | string[]) {
   const constraints = status
     ? [where('busId', '==', busId), where('status', Array.isArray(status) ? 'in' : '==', status)]
     : [where('busId', '==', busId)];
-  return useFirestoreCollection<Ticket>('tickets', constraints);
+  return useFirestoreCollection<Ticket>('tickets', constraints, [busId, status]);
 }
 
 export function useConductorBus(conductorId: string) {
   const { data: buses, loading, error } = useFirestoreCollection<Bus>(
     'buses',
-    [where('conductorId', '==', conductorId)]
+    [where('conductorId', '==', conductorId)],
+    [conductorId]
   );
   return { bus: buses[0] || null, loading, error };
+}
+
+export function useNotifications(constraints: QueryConstraint[] = [], dependencies: any[] = []) {
+  return useFirestoreCollection<AppNotification>('notifications', constraints, dependencies);
 }

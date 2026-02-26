@@ -5,13 +5,69 @@ import { useBuses, useRoutes, useStops } from '@/hooks/useFirestore';
 import { BusMap } from '@/components/BusMap';
 import { CrowdIndicator } from '@/components/CrowdIndicator';
 import { Bus as BusIcon, Loader2, Activity, Gauge, ArrowRight, AlertTriangle } from 'lucide-react';
-import { where } from 'firebase/firestore';
+import { where, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { cn } from '@/lib/utils';
+import { useNotifications } from '@/hooks/useFirestore';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { db } from '@/lib/firebase';
+import { useToast } from '@/hooks/use-toast';
+import { Check, AlertCircle } from 'lucide-react';
 
 export default function LiveMonitor() {
-  const { data: buses, loading } = useBuses([where('status', 'in', ['active', 'started'])]);
+  const { toast } = useToast();
+  const { data: buses, loading } = useBuses([where('status', 'in', ['active', 'started', 'starting'])]);
   const { data: stops } = useStops();
   const { data: routes } = useRoutes();
+
+  // Incident Monitoring
+  const { data: incidents } = useNotifications(
+    [
+      where('type', '==', 'incident'),
+      where('isRead', '==', false)
+    ],
+    []
+  );
+
+  const prevIncidentsCount = React.useRef(0);
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+
+  React.useEffect(() => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3');
+    }
+
+    if (incidents && incidents.length > prevIncidentsCount.current) {
+      audioRef.current.loop = true;
+      audioRef.current.play().catch(err => console.error('Audio play failed:', err));
+
+      // Stop after 5 seconds
+      setTimeout(() => {
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.currentTime = 0;
+        }
+      }, 5000);
+    }
+    prevIncidentsCount.current = incidents?.length || 0;
+  }, [incidents]);
+
+  const handleMarkIncidentResolved = async (incidentId: string) => {
+    try {
+      const incidentRef = doc(db, 'notifications', incidentId);
+      await updateDoc(incidentRef, {
+        isRead: true,
+        status: 'resolved',
+        updatedAt: serverTimestamp(),
+      });
+      toast({
+        title: 'Incident Resolved',
+        description: 'The incident has been marked as resolved.',
+      });
+    } catch (err) {
+      console.error('Error marking incident as resolved:', err);
+    }
+  };
 
   if (loading) {
     return (
@@ -31,6 +87,32 @@ export default function LiveMonitor() {
           <h1 className="text-2xl font-bold">Live Monitor</h1>
           <span className="text-sm text-muted-foreground">({buses.length} active/started buses)</span>
         </div>
+
+        {/* Incident Alerts */}
+        {incidents && incidents.length > 0 && (
+          <div className="space-y-3">
+            {incidents.map((incident) => (
+              <Alert key={incident.id} variant="destructive" className="animate-pulse border-2">
+                <AlertCircle className="h-5 w-5" />
+                <div className="flex-1">
+                  <div className="font-bold text-lg mb-1">PASSENGER INCIDENT REPORTED!</div>
+                  <AlertDescription className="text-base font-medium">
+                    {incident.message}
+                  </AlertDescription>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="bg-background hover:bg-muted"
+                  onClick={() => handleMarkIncidentResolved(incident.id)}
+                >
+                  <Check className="h-4 w-4 mr-1" />
+                  Mark as Resolved
+                </Button>
+              </Alert>
+            ))}
+          </div>
+        )}
 
         <div className="grid lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2">

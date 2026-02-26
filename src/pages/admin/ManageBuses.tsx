@@ -19,6 +19,7 @@ import {
   AlertCircle,
   Search
 } from 'lucide-react';
+import { format, startOfToday, parseISO, isSameDay } from 'date-fns';
 import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
@@ -40,6 +41,7 @@ export default function ManageBuses() {
     capacity: '50',
     status: 'idle',
     scheduledTime: '',
+    scheduledDate: '',
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -58,6 +60,7 @@ export default function ManageBuses() {
       capacity: '50',
       status: 'idle',
       scheduledTime: '',
+      scheduledDate: '',
     });
     setEditingBus(null);
   };
@@ -76,6 +79,7 @@ export default function ManageBuses() {
       capacity: bus.capacity.toString(),
       status: bus.status || 'idle',
       scheduledTime: bus.scheduledTime || '',
+      scheduledDate: bus.scheduledDate || '',
     });
     setDialogOpen(true);
   };
@@ -83,6 +87,39 @@ export default function ManageBuses() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
+
+    // Validate scheduled time if date is today
+    if (formData.scheduledDate && formData.scheduledTime) {
+      const today = startOfToday();
+      const selectedDate = parseISO(formData.scheduledDate);
+
+      if (isSameDay(selectedDate, today)) {
+        const [hours, minutes] = formData.scheduledTime.split(':').map(Number);
+        const scheduledDateTime = new Date();
+        scheduledDateTime.setHours(hours, minutes, 0, 0);
+
+        if (scheduledDateTime < new Date()) {
+          toast({
+            title: 'Invalid Schedule',
+            description: 'Cannot schedule a trip for a past time today.',
+            variant: 'destructive',
+          });
+          setIsSubmitting(false);
+          return;
+        }
+      }
+    }
+
+    // Enforce schedule for 'starting' status
+    if (formData.status === 'starting' && (!formData.scheduledDate || !formData.scheduledTime)) {
+      toast({
+        title: 'Schedule Required',
+        description: 'Buses can only be set to "starting" if they have a scheduled date and time.',
+        variant: 'destructive',
+      });
+      setIsSubmitting(false);
+      return;
+    }
 
     try {
       if (editingBus) {
@@ -95,6 +132,7 @@ export default function ManageBuses() {
           capacity: parseInt(formData.capacity),
           status: formData.status,
           scheduledTime: formData.scheduledTime || null,
+          scheduledDate: formData.scheduledDate || null,
           updatedAt: serverTimestamp(),
         });
         toast({ title: 'Bus Updated', description: `${formData.busNumber} has been updated.` });
@@ -108,6 +146,7 @@ export default function ManageBuses() {
           passengerCount: 0,
           status: formData.status,
           scheduledTime: formData.scheduledTime || null,
+          scheduledDate: formData.scheduledDate || null,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -214,17 +253,23 @@ export default function ManageBuses() {
                       <span className="text-muted-foreground">Conductor: </span>
                       <span className="font-medium">{conductor?.displayName || 'Not assigned'}</span>
                     </div>
-                    {bus.scheduledTime && (
+                    {(bus.scheduledTime || bus.scheduledDate) && (
                       <div className="text-sm">
                         <span className="text-muted-foreground">Scheduled: </span>
-                        <span className="font-medium">{bus.scheduledTime}</span>
+                        <span className="font-medium">
+                          {bus.scheduledDate && format(new Date(bus.scheduledDate), 'MMM d, yyyy')}
+                          {bus.scheduledDate && bus.scheduledTime && ' at '}
+                          {bus.scheduledTime}
+                        </span>
                       </div>
                     )}
-                    <CrowdIndicator
-                      passengerCount={bus.passengerCount}
-                      capacity={bus.capacity}
-                      size="sm"
-                    />
+                    {bus.status === 'started' && (
+                      <CrowdIndicator
+                        passengerCount={bus.passengerCount}
+                        capacity={bus.capacity}
+                        size="sm"
+                      />
+                    )}
                     <div className="flex gap-2 pt-2">
                       <Button
                         variant="outline"
@@ -268,14 +313,26 @@ export default function ManageBuses() {
                   required
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="scheduledTime">Scheduled Time (Optional)</Label>
-                <Input
-                  id="scheduledTime"
-                  type="time"
-                  value={formData.scheduledTime}
-                  onChange={(e) => setFormData({ ...formData, scheduledTime: e.target.value })}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="scheduledDate">Scheduled Date</Label>
+                  <Input
+                    id="scheduledDate"
+                    type="date"
+                    min={new Date().toISOString().split('T')[0]}
+                    value={formData.scheduledDate}
+                    onChange={(e) => setFormData({ ...formData, scheduledDate: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="scheduledTime">Scheduled Time</Label>
+                  <Input
+                    id="scheduledTime"
+                    type="time"
+                    value={formData.scheduledTime}
+                    onChange={(e) => setFormData({ ...formData, scheduledTime: e.target.value })}
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="capacity">Capacity</Label>

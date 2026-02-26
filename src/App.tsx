@@ -33,6 +33,7 @@ import FleetStatus from "@/pages/admin/FleetStatus";
 import BusDetails from "@/pages/admin/BusDetails";
 import ManageUsers from "@/pages/admin/ManageUsers";
 import CreateConductor from "@/pages/admin/CreateConductor";
+import Notifications from "@/pages/Notifications";
 import Profile from "@/pages/Profile";
 
 import NotFound from "./pages/NotFound";
@@ -60,6 +61,7 @@ const App = () => (
               <Route path="/passenger/track" element={<ProtectedRoute allowedRoles={['passenger']}><TrackBus /></ProtectedRoute>} />
               <Route path="/passenger/book" element={<ProtectedRoute allowedRoles={['passenger']}><BookTicket /></ProtectedRoute>} />
               <Route path="/passenger/tickets" element={<ProtectedRoute allowedRoles={['passenger']}><MyTickets /></ProtectedRoute>} />
+              <Route path="/passenger/notifications" element={<ProtectedRoute allowedRoles={['passenger']}><Notifications /></ProtectedRoute>} />
 
               {/* Conductor Routes */}
               <Route path="/conductor" element={<ProtectedRoute allowedRoles={['conductor']}><ConductorDashboard /></ProtectedRoute>} />
@@ -77,6 +79,7 @@ const App = () => (
               <Route path="/admin/fleet/:id" element={<ProtectedRoute allowedRoles={['admin']}><BusDetails /></ProtectedRoute>} />
               <Route path="/admin/users" element={<ProtectedRoute allowedRoles={['admin']}><ManageUsers /></ProtectedRoute>} />
               <Route path="/admin/conductors/new" element={<ProtectedRoute allowedRoles={['admin']}><CreateConductor /></ProtectedRoute>} />
+              <Route path="/admin/notifications" element={<ProtectedRoute allowedRoles={['admin']}><Notifications /></ProtectedRoute>} />
 
               {/* Shared Routes */}
               <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />

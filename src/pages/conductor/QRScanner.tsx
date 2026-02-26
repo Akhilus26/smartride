@@ -4,13 +4,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { useConductorBus, useStops } from '@/hooks/useFirestore';
+import { useConductorBus, useStops, useRoute } from '@/hooks/useFirestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
-import { 
-  QrCode, 
-  CheckCircle, 
-  XCircle, 
+import {
+  QrCode,
+  CheckCircle,
+  XCircle,
   Loader2,
   AlertCircle,
   Camera,
@@ -27,6 +27,7 @@ export default function QRScanner() {
   const { userProfile } = useAuth();
   const { toast } = useToast();
   const { bus, loading: busLoading } = useConductorBus(userProfile?.uid || '');
+  const { data: route } = useRoute(bus?.routeId || null);
   const { data: stops } = useStops();
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -78,7 +79,7 @@ export default function QRScanner() {
 
   const handleScan = async (ticketId: string) => {
     if (processing || !bus) return;
-    
+
     setProcessing(true);
     stopScanner();
 
@@ -97,6 +98,18 @@ export default function QRScanner() {
       }
 
       const ticket = { id: ticketSnap.id, ...ticketSnap.data() } as Ticket;
+
+      // Validate boarding stop
+      const currentStopId = route?.stops[bus.currentStopIndex || 0];
+      if (ticket.boardingStop !== currentStopId) {
+        setScanResult({
+          success: false,
+          message: `This passenger is booked from ${getStopName(ticket.boardingStop)} to ${getStopName(ticket.destinationStop)} not from ${getStopName(currentStopId || '')}`,
+          ticket,
+        });
+        setProcessing(false);
+        return;
+      }
 
       // Validate ticket
       if (ticket.busId !== bus.id) {
@@ -253,11 +266,10 @@ export default function QRScanner() {
             {/* Scan Result */}
             {scanResult && (
               <div
-                className={`p-4 rounded-lg border-2 ${
-                  scanResult.success
+                className={`p-4 rounded-lg border-2 ${scanResult.success
                     ? 'bg-success/10 border-success'
                     : 'bg-destructive/10 border-destructive'
-                }`}
+                  }`}
               >
                 <div className="flex items-start gap-3">
                   {scanResult.success ? (

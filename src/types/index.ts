@@ -25,7 +25,9 @@ export interface Bus {
   status: 'idle' | 'active' | 'maintenance' | 'starting' | 'ended' | 'started';
   hazard?: boolean;
   hazardReason?: string;
+  hazardOtherReason?: string;
   scheduledTime?: string;
+  scheduledDate?: string;
   location?: {
     latitude: number;
     longitude: number;
@@ -39,13 +41,16 @@ export interface Bus {
 }
 
 // Notification document
-export interface Notification {
+export interface AppNotification {
   id: string;
-  type: 'overspeed' | 'hazard' | 'trip_completed';
+  type: 'overspeed' | 'hazard' | 'trip_completed' | 'incident';
   busId: string;
   speed?: number;
   message?: string;
+  hazardReason?: string;
+  hazardOtherReason?: string;
   isRead: boolean;
+  status?: 'pending' | 'resolved';
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -85,6 +90,7 @@ export interface Ticket {
   routeId: string;
   boardingStop: string;
   destinationStop: string;
+  ticketCount: number;
   fare: number;
   status: 'PENDING' | 'CONFIRMED' | 'BOARDED' | 'EXITED' | 'CANCELLED' | 'EXPIRED';
   paymentMethod: 'online' | 'cash';

@@ -11,6 +11,7 @@ const passengerNavItems = [
   { label: 'Track Bus', href: '/passenger/track' },
   { label: 'Book Ticket', href: '/passenger/book' },
   { label: 'My Tickets', href: '/passenger/tickets' },
+  { label: 'Notifications', href: '/passenger/notifications' },
 ];
 
 const conductorNavItems = [
@@ -29,6 +30,7 @@ const adminNavItems = [
   { label: 'Reports', href: '/admin/reports' },
   { label: 'Users', href: '/admin/users' },
   { label: 'Add Conductor', href: '/admin/conductors/new' },
+  { label: 'Notifications', href: '/admin/notifications' },
 ];
 
 export function Layout({ children }: LayoutProps) {

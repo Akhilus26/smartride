@@ -17,21 +17,54 @@ import {
   Gauge,
   ArrowRight
 } from 'lucide-react';
-import { where } from 'firebase/firestore';
+import { where, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { cn } from '@/lib/utils';
+import { isAfter, parseISO, startOfToday, isSameDay } from 'date-fns';
+import { useAuth } from '@/contexts/AuthContext';
+import { useTickets } from '@/hooks/useFirestore';
+import { db } from '@/lib/firebase';
+import { useToast } from '@/hooks/use-toast';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { AlertCircle, AlertTriangle } from 'lucide-react';
 
 export default function TrackBus() {
-  const { data: buses, loading: busesLoading } = useBuses([where('status', 'in', ['active', 'started'])]);
-  const { data: stops, loading: stopsLoading } = useStops();
-  const { data: routes, loading: routesLoading } = useRoutes();
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const { data: userTickets } = useTickets(user?.uid);
+  const { data: buses, loading: busesLoading } = useBuses([where('status', 'in', ['active', 'started', 'starting'])], []);
+  const { data: stops, loading: stopsLoading } = useStops([], []);
+  const { data: routes, loading: routesLoading } = useRoutes([], []);
   const [selectedBus, setSelectedBus] = useState<Bus | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Incident Reporting State
+  const [incidentDialogOpen, setIncidentDialogOpen] = useState(false);
+  const [incidentReason, setIncidentReason] = useState('');
+  const [incidentOtherReason, setIncidentOtherReason] = useState('');
+  const [isReportingIncident, setIsReportingIncident] = useState(false);
+
   const loading = busesLoading || stopsLoading || routesLoading;
 
-  const filteredBuses = buses.filter((bus) =>
-    bus.busNumber.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredBuses = buses.filter((bus) => {
+    const matchesSearch = bus.busNumber.toLowerCase().includes(searchQuery.toLowerCase());
+    const hasActiveSchedule = bus.scheduledDate && bus.scheduledTime;
+    return matchesSearch && hasActiveSchedule;
+  });
 
   const mapCenter: [number, number] = selectedBus?.location
     ? [selectedBus.location.latitude, selectedBus.location.longitude]
@@ -39,6 +72,50 @@ export default function TrackBus() {
 
   const handleBusClick = (bus: Bus) => {
     setSelectedBus(bus);
+  };
+
+  const handleReportIncident = async () => {
+    if (!selectedBus || !incidentReason || !user) return;
+
+    setIsReportingIncident(true);
+    try {
+      // Play warning sound when reporting
+      const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+      audio.play().catch(err => console.error('Audio play failed:', err));
+
+      const reasonDisplay = incidentReason === 'others' ? incidentOtherReason : incidentReason;
+
+      await addDoc(collection(db, 'notifications'), {
+        type: 'incident',
+        busId: selectedBus.id,
+        message: `Passenger reported an incident on Bus ${selectedBus.busNumber} due to ${reasonDisplay}`,
+        hazardReason: incidentReason,
+        hazardOtherReason: incidentReason === 'others' ? incidentOtherReason : null,
+        isRead: false,
+        status: 'pending',
+        reportedBy: user.uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      toast({
+        title: 'Incident Reported',
+        description: 'Conductor and Admin have been notified.',
+        variant: 'destructive',
+      });
+
+      setIncidentDialogOpen(false);
+      setIncidentReason('');
+      setIncidentOtherReason('');
+    } catch (err) {
+      toast({
+        title: 'Error',
+        description: 'Failed to report incident',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsReportingIncident(false);
+    }
   };
 
   return (
@@ -63,7 +140,7 @@ export default function TrackBus() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search by bus number..."
+                  placeholder="Search by bus name..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-9"
@@ -120,12 +197,16 @@ export default function TrackBus() {
                           </div>
                           <div className="space-y-1">
                             <div className="text-[10px] uppercase text-muted-foreground font-semibold">Crowd</div>
-                            <CrowdIndicator
-                              passengerCount={bus.passengerCount}
-                              capacity={bus.capacity}
-                              size="sm"
-                              showCount={false}
-                            />
+                            {bus.status === 'started' ? (
+                              <CrowdIndicator
+                                passengerCount={bus.passengerCount}
+                                capacity={bus.capacity}
+                                size="sm"
+                                showCount={false}
+                              />
+                            ) : (
+                              <div className="text-xs font-medium text-muted-foreground italic">Not on trip</div>
+                            )}
                           </div>
                         </div>
 
@@ -158,16 +239,118 @@ export default function TrackBus() {
                           })()}
                         </div>
 
-                        <CrowdProgress
-                          passengerCount={bus.passengerCount}
-                          capacity={bus.capacity}
-                        />
+                        <div className="mt-4 flex flex-col gap-2">
+                          {bus.status === 'started' && (
+                            <CrowdProgress
+                              passengerCount={bus.passengerCount}
+                              capacity={bus.capacity}
+                            />
+                          )}
+
+                          {(() => {
+                            const boardedTicket = userTickets?.find(t =>
+                              t.busId === bus.id &&
+                              t.status === 'BOARDED' &&
+                              t.userId === user.uid
+                            );
+
+                            if (!boardedTicket) return null;
+
+                            const route = routes.find(r => r.id === bus.routeId);
+                            if (!route) return null;
+
+                            const boardingIndex = route.stops.indexOf(boardedTicket.boardingStop);
+                            const destinationIndex = route.stops.indexOf(boardedTicket.destinationStop);
+                            const currentIndex = bus.currentStopIndex || 0;
+
+                            const isStopEligible = currentIndex >= boardingIndex && currentIndex <= destinationIndex;
+
+                            if (!isStopEligible) return null;
+
+                            return (
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                className="w-full mt-2"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedBus(bus);
+                                  setIncidentDialogOpen(true);
+                                }}
+                              >
+                                <AlertCircle className="h-4 w-4 mr-2" />
+                                Report Incident
+                              </Button>
+                            );
+                          })()}
+                        </div>
                       </CardContent>
                     </Card>
                   ))
                 )}
               </div>
             </div>
+
+            {/* Incident Dialog */}
+            <Dialog open={incidentDialogOpen} onOpenChange={setIncidentDialogOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Report Incident</DialogTitle>
+                  <DialogDescription>
+                    Report an abuse or medical emergency on this bus. Conductor and Admin will be notified immediately.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="incident-reason">Type of Incident</Label>
+                    <Select
+                      value={incidentReason}
+                      onValueChange={setIncidentReason}
+                    >
+                      <SelectTrigger id="incident-reason">
+                        <SelectValue placeholder="Select incident type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="abuse">Abuse / Harassment</SelectItem>
+                        <SelectItem value="medical emergency">Medical Emergency</SelectItem>
+                        <SelectItem value="others">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {incidentReason === 'others' && (
+                    <div className="space-y-2">
+                      <Label htmlFor="incident-other">Specify Reason</Label>
+                      <textarea
+                        id="incident-other"
+                        className="w-full min-h-[100px] p-3 rounded-md border bg-background"
+                        placeholder="Please describe the incident..."
+                        value={incidentOtherReason}
+                        onChange={(e) => setIncidentOtherReason(e.target.value)}
+                        required
+                      />
+                    </div>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIncidentDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={handleReportIncident}
+                    disabled={!incidentReason || (incidentReason === 'others' && !incidentOtherReason) || isReportingIncident}
+                  >
+                    {isReportingIncident ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <AlertTriangle className="h-4 w-4 mr-2" />
+                    )}
+                    Send Alert
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             {/* Map */}
             <div className="lg:col-span-2">
@@ -179,7 +362,14 @@ export default function TrackBus() {
                       Live Map
                     </CardTitle>
                     <p className="text-sm text-muted-foreground mt-1">
-                      {buses.length} active bus{buses.length !== 1 ? 'es' : ''}
+                      {(() => {
+                        const activeCount = buses.filter(bus =>
+                          (bus.status === 'starting' || bus.status === 'started') &&
+                          bus.scheduledDate &&
+                          bus.scheduledTime
+                        ).length;
+                        return `${activeCount} active bus${activeCount !== 1 ? 'es' : ''}`;
+                      })()}
                     </p>
                   </div>
                   {selectedBus && (
