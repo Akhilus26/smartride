@@ -47,7 +47,7 @@ const App = () => (
         <BusTrackingProvider>
           <Toaster />
           <Sonner />
-          <BrowserRouter>
+          <BrowserRouter basename="/smartride">
             <Routes>
               {/* Public Routes */}
               <Route path="/login" element={<Login />} />
