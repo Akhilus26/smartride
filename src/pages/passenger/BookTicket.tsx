@@ -41,7 +41,7 @@ export default function BookTicket() {
   const { userProfile } = useAuth();
   const { toast } = useToast();
 
-  const { data: buses, loading: busesLoading } = useBuses([where('status', 'in', ['active', 'started', 'starting', 'idle'])]);
+  const { data: buses, loading: busesLoading } = useBuses([where('status', 'in', ['started', 'starting'])]);
   const { data: routes, loading: routesLoading } = useRoutes([where('isActive', '==', true)]);
   const { data: stops, loading: stopsLoading } = useStops();
 
