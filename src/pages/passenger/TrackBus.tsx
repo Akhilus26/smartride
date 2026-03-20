@@ -46,7 +46,7 @@ export default function TrackBus() {
   const { user } = useAuth();
   const { toast } = useToast();
   const { data: userTickets } = useTickets(user?.uid);
-  const { data: buses, loading: busesLoading } = useBuses([where('status', 'in', ['active', 'started', 'starting'])], []);
+  const { data: buses, loading: busesLoading } = useBuses([where('status', '==', 'starting')], []);
   const { data: stops, loading: stopsLoading } = useStops([], []);
   const { data: routes, loading: routesLoading } = useRoutes([], []);
   const [selectedBus, setSelectedBus] = useState<Bus | null>(null);
@@ -62,8 +62,8 @@ export default function TrackBus() {
 
   const filteredBuses = buses.filter((bus) => {
     const matchesSearch = bus.busNumber.toLowerCase().includes(searchQuery.toLowerCase());
-    const hasActiveSchedule = bus.scheduledDate && bus.scheduledTime;
-    return matchesSearch && hasActiveSchedule;
+    // Only show starting buses that have a route assigned
+    return matchesSearch && bus.routeId;
   });
 
   const mapCenter: [number, number] = selectedBus?.location
@@ -134,13 +134,47 @@ export default function TrackBus() {
           </div>
         ) : (
           <div className="grid lg:grid-cols-3 gap-6">
-            {/* Bus List */}
+            {/* Bus List & Selection */}
             <div className="lg:col-span-1 space-y-4">
-              {/* Search */}
+              {/* Bus Selection Dropdown */}
+              <div className="space-y-2">
+                <Label htmlFor="bus-select">Select Bus to Track</Label>
+                <Select
+                  value={selectedBus?.id || "none"}
+                  onValueChange={(value) => {
+                    if (value === "none") {
+                      setSelectedBus(null);
+                    } else {
+                      const bus = buses.find(b => b.id === value);
+                      if (bus) setSelectedBus(bus);
+                    }
+                  }}
+                >
+                  <SelectTrigger id="bus-select" className="w-full">
+                    <SelectValue placeholder="Select a bus starting soon" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">All Starting Buses</SelectItem>
+                    {buses.map((bus) => {
+                      const route = routes.find(r => r.id === bus.routeId);
+                      return (
+                        <SelectItem key={bus.id} value={bus.id}>
+                          <div className="flex flex-col text-left">
+                            <span className="font-medium">{bus.busNumber}</span>
+                            <span className="text-xs text-muted-foreground">{route?.name || 'Unknown Route'}</span>
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Search Fallback */}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search by bus name..."
+                  placeholder="Or search by bus number..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-9"
@@ -149,12 +183,12 @@ export default function TrackBus() {
 
               {/* Bus Cards */}
               <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
-                {filteredBuses.length === 0 ? (
+                {(selectedBus ? [selectedBus] : filteredBuses).length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     {searchQuery ? 'No buses match your search' : 'No active buses'}
                   </div>
                 ) : (
-                  filteredBuses.map((bus) => (
+                  (selectedBus ? [selectedBus] : filteredBuses).map((bus) => (
                     <Card
                       key={bus.id}
                       className={cn(
@@ -171,14 +205,8 @@ export default function TrackBus() {
                             </div>
                             <div>
                               <div className="font-semibold">{bus.busNumber}</div>
-                              <div className="text-xs text-muted-foreground flex items-center gap-1">
-                                <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
-                                {(() => {
-                                  const route = routes.find(r => r.id === bus.routeId);
-                                  const isLastStop = route && bus.currentStopIndex === route.stops.length - 1;
-                                  if (isLastStop) return 'Destination Reached';
-                                  return bus.status === 'started' ? 'Started' : 'Live';
-                                })()}
+                              <div className="text-xs text-muted-foreground">
+                                {routes.find(r => r.id === bus.routeId)?.name || 'Starting Soon'}
                               </div>
                             </div>
                           </div>
@@ -363,12 +391,8 @@ export default function TrackBus() {
                     </CardTitle>
                     <p className="text-sm text-muted-foreground mt-1">
                       {(() => {
-                        const activeCount = buses.filter(bus =>
-                          (bus.status === 'starting' || bus.status === 'started') &&
-                          bus.scheduledDate &&
-                          bus.scheduledTime
-                        ).length;
-                        return `${activeCount} active bus${activeCount !== 1 ? 'es' : ''}`;
+                        const activeCount = (selectedBus ? [selectedBus] : buses).length;
+                        return `${activeCount} starting bus${activeCount !== 1 ? 'es' : ''}`;
                       })()}
                     </p>
                   </div>
@@ -385,12 +409,19 @@ export default function TrackBus() {
                 </CardHeader>
                 <CardContent>
                   <BusMap
-                    buses={buses}
-                    stops={stops.map((s) => ({
-                      id: s.id,
-                      name: s.name,
-                      location: s.location,
-                    }))}
+                    buses={selectedBus ? [selectedBus] : filteredBuses}
+                    stops={(() => {
+                      if (!selectedBus) return [];
+                      const route = routes.find(r => r.id === selectedBus.routeId);
+                      if (!route) return [];
+                      return stops
+                        .filter(s => route.stops.includes(s.id))
+                        .map(s => ({
+                          id: s.id,
+                          name: s.name,
+                          location: s.location,
+                        }));
+                    })()}
                     center={mapCenter}
                     zoom={selectedBus ? 15 : 13}
                     height="500px"
