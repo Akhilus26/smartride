@@ -46,10 +46,10 @@ export default function TrackBus() {
   const { user } = useAuth();
   const { toast } = useToast();
   const { data: userTickets } = useTickets(user?.uid);
-  const { data: buses, loading: busesLoading } = useBuses([where('status', '==', 'starting')], []);
+  const { data: buses, loading: busesLoading } = useBuses([where('status', '==', 'started')], []);
   const { data: stops, loading: stopsLoading } = useStops([], []);
   const { data: routes, loading: routesLoading } = useRoutes([], []);
-  const [selectedBus, setSelectedBus] = useState<Bus | null>(null);
+  const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Incident Reporting State
@@ -66,12 +66,14 @@ export default function TrackBus() {
     return matchesSearch && bus.routeId;
   });
 
+  const selectedBus = buses.find(b => b.id === selectedBusId) || null;
+
   const mapCenter: [number, number] = selectedBus?.location
     ? [selectedBus.location.latitude, selectedBus.location.longitude]
     : [12.9716, 77.5946];
 
   const handleBusClick = (bus: Bus) => {
-    setSelectedBus(bus);
+    setSelectedBusId(bus.id);
   };
 
   const handleReportIncident = async () => {
@@ -140,21 +142,20 @@ export default function TrackBus() {
               <div className="space-y-2">
                 <Label htmlFor="bus-select">Select Bus to Track</Label>
                 <Select
-                  value={selectedBus?.id || "none"}
+                  value={selectedBusId || "none"}
                   onValueChange={(value) => {
                     if (value === "none") {
-                      setSelectedBus(null);
+                      setSelectedBusId(null);
                     } else {
-                      const bus = buses.find(b => b.id === value);
-                      if (bus) setSelectedBus(bus);
+                      setSelectedBusId(value);
                     }
                   }}
                 >
                   <SelectTrigger id="bus-select" className="w-full">
-                    <SelectValue placeholder="Select a bus starting soon" />
+                    <SelectValue placeholder="Select a running bus" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">All Starting Buses</SelectItem>
+                    <SelectItem value="none">All Running Buses</SelectItem>
                     {buses.map((bus) => {
                       const route = routes.find(r => r.id === bus.routeId);
                       return (
@@ -302,7 +303,7 @@ export default function TrackBus() {
                                 className="w-full mt-2"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setSelectedBus(bus);
+                                  setSelectedBusId(bus.id);
                                   setIncidentDialogOpen(true);
                                 }}
                               >
@@ -392,7 +393,7 @@ export default function TrackBus() {
                     <p className="text-sm text-muted-foreground mt-1">
                       {(() => {
                         const activeCount = (selectedBus ? [selectedBus] : buses).length;
-                        return `${activeCount} starting bus${activeCount !== 1 ? 'es' : ''}`;
+                        return `${activeCount} running bus${activeCount !== 1 ? 'es' : ''}`;
                       })()}
                     </p>
                   </div>
@@ -400,7 +401,7 @@ export default function TrackBus() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setSelectedBus(null)}
+                      onClick={() => setSelectedBusId(null)}
                     >
                       <X className="h-4 w-4 mr-1" />
                       Clear selection
